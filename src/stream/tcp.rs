@@ -182,7 +182,7 @@ impl AsyncRead for IpStackTcpStream {
                 Pin::new(&mut self.tcb.timeout).poll(cx),
                 std::task::Poll::Ready(_)
             ) {
-                trace!("timeout reached for {:?}", self.dst_addr);
+                warn!("Timeout reached for {:?}", self.dst_addr);
                 self.packet_sender
                     .send(self.create_rev_packet(
                         tcp_flags::RST | tcp_flags::ACK,
@@ -225,6 +225,7 @@ impl AsyncRead for IpStackTcpStream {
                 return std::task::Poll::Ready(Ok(()));
             }
             if self.shutdown.is_some() && matches!(self.tcb.get_state(), TcpState::Established) {
+                trace!("actively shutdown tcp");
                 self.tcb.change_state(TcpState::FinWait1);
                 self.packet_to_send = Some(self.create_rev_packet(
                     tcp_flags::FIN | tcp_flags::ACK,
@@ -247,12 +248,12 @@ impl AsyncRead for IpStackTcpStream {
                             ErrorKind::ConnectionReset,
                         )));
                     }
-                    if matches!(
-                        self.tcb.check_pkt_type(&t, &p.payload),
-                        PacketStatus::Invalid
-                    ) {
-                        continue;
-                    }
+                    // if matches!(
+                    //     self.tcb.check_pkt_type(&t, &p.payload),
+                    //     PacketStatus::Invalid
+                    // ) {
+                    //     continue;
+                    // }
 
                     if matches!(self.tcb.get_state(), TcpState::SynReceived(true)) {
                         if t.flags() == tcp_flags::ACK {
@@ -381,6 +382,7 @@ impl AsyncRead for IpStackTcpStream {
                             continue;
                         }
                     } else if matches!(self.tcb.get_state(), TcpState::FinWait2) {
+                        trace!("finwait2 close");
                         self.packet_to_send =
                             Some(self.create_rev_packet(0, DROP_TTL, None, Vec::new())?);
                         self.tcb.change_state(TcpState::Closed);

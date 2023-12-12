@@ -10,7 +10,7 @@ use tokio::{
     select,
     sync::mpsc::{self, UnboundedReceiver, UnboundedSender},
 };
-use tracing::{error, trace};
+use tracing::{error, info, trace, warn};
 
 use crate::{
     packet::IpStackPacketProtocol,
@@ -58,21 +58,21 @@ impl IpStack {
 
             let (pkt_sender, mut pkt_receiver) = mpsc::unbounded_channel::<NetworkPacket>();
             loop {
-                // dbg!(streams.len());
                 select! {
                     Ok(n) = device.read(&mut buffer) => {
                         let offset = if packet_info && cfg!(not(target_os = "windows")) {4} else {0};
-                        // dbg!(&buffer[offset..n]);
-                        let Ok(packet) = NetworkPacket::parse(&buffer[offset..n])else{
-                            trace!("parse error");
+                        let content = &buffer[offset..n];
+                        let res = NetworkPacket::parse(content);
+                        let Ok(packet) = res else {
+                            warn!("parse error {:?}", res.unwrap_err());
                             continue;
                         };
                         match streams.entry(packet.network_tuple()){
                             Occupied(entry) =>{
                                 let t = packet.transport_protocol();
                                 if let Err(_x) = entry.get().send(packet){
-                                    trace!("{}", _x);
-                                    match t{
+                                    warn!("after device-read, cannot send {}", _x);
+                                    match t {
                                         IpStackPacketProtocol::Tcp(_t) => {
                                             // dbg!(t.flags());
                                         }
@@ -92,7 +92,7 @@ impl IpStack {
                                                 accept_sender.send(IpStackStream::Tcp(stream))?;
                                             }
                                             Err(e) => {
-                                                error!("{}",e);
+                                                error!("after device-read, create tcp stream failed, {}",e);
                                             }
                                         }
                                     }
@@ -107,11 +107,13 @@ impl IpStack {
                     }
                     Some(packet) = pkt_receiver.recv() => {
                         if packet.ttl() == 0{
-                            streams.remove(&packet.reverse_network_tuple());
+                            let reverse = packet.reverse_network_tuple();
+                            warn!("ttl 0 remove stream {:?}", &reverse);
+                            streams.remove(&reverse);
                             continue;
                         }
                         #[allow(unused_mut)]
-                        let Ok(mut packet_byte) = packet.to_bytes() else{
+                        let Ok(mut packet_byte) = packet.to_bytes() else {
                             trace!("to_bytes error");
                             continue;
                         };

@@ -5,12 +5,13 @@ use std::{
 };
 
 use tokio::time::Sleep;
+use tracing::warn;
 
 use crate::packet::TcpPacket;
 
 const MAX_UNACK: u32 = 1024 * 16; // 16KB
 const READ_BUFFER_SIZE: usize = 1024 * 16; // 16KB
-const TCP_TIMEOUT: Duration = Duration::from_secs(5);
+const TCP_TIMEOUT: Duration = Duration::from_secs(1500);
 
 #[derive(Clone, Debug)]
 pub enum TcpState {
@@ -29,6 +30,7 @@ pub(super) enum PacketStatus {
     Ack,
 }
 
+#[derive(Debug)]
 pub(super) struct Tcb {
     pub(super) seq: u32,
     pub(super) retransmission: Option<u32>,
@@ -137,22 +139,25 @@ impl Tcb {
     //     }
     // }
 
+    // FIXME. 
     pub(super) fn check_pkt_type(&self, incoming_packet: &TcpPacket, p: &[u8]) -> PacketStatus {
-        let received_ack_distance = self
-            .seq
-            .wrapping_sub(incoming_packet.inner().acknowledgment_number);
+        // let received_ack_distance = self
+        //     .seq
+        //     .wrapping_sub(incoming_packet.inner().acknowledgment_number);
 
-        let current_ack_distance = self.seq.wrapping_sub(self.last_ack);
-        if received_ack_distance > current_ack_distance
-            || (incoming_packet.inner().acknowledgment_number != self.seq
-                && incoming_packet
-                    .inner()
-                    .acknowledgment_number
-                    .saturating_sub(self.seq)
-                    == 0)
-        {
-            PacketStatus::Invalid
-        } else if self.last_ack == incoming_packet.inner().acknowledgment_number {
+        // let current_ack_distance = self.seq.wrapping_sub(self.last_ack);
+        // if received_ack_distance > current_ack_distance
+        //     || (incoming_packet.inner().acknowledgment_number != self.seq
+        //         && incoming_packet
+        //             .inner()
+        //             .acknowledgment_number
+        //             .saturating_sub(self.seq)
+        //             == 0)
+        // {
+        //     warn!("tcp packet invalid, dist");
+        //     PacketStatus::Invalid
+        // } else {
+        if self.last_ack == incoming_packet.inner().acknowledgment_number {
             if !p.is_empty() {
                 PacketStatus::NewPacket
             } else if self.send_window == incoming_packet.inner().window_size
@@ -169,8 +174,10 @@ impl Tcb {
                 PacketStatus::Ack
             }
         } else {
+            warn!("tcp packet invalid");
             PacketStatus::Invalid
         }
+        // }
     }
     pub(super) fn change_last_ack(&mut self, ack: u32) {
         self.timeout
@@ -197,6 +204,7 @@ impl Tcb {
     }
 }
 
+#[derive(Debug)]
 pub struct InflightPacket {
     pub seq: u32,
     pub payload: Vec<u8>,
@@ -216,6 +224,7 @@ impl InflightPacket {
     }
 }
 
+#[derive(Debug)]
 pub struct UnorderedPacket {
     pub payload: Vec<u8>,
     pub recv_time: SystemTime,

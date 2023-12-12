@@ -1,5 +1,6 @@
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
+use std::{net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr}, fmt::Debug};
 
+use derivative::Derivative;
 use etherparse::{IpHeader, PacketHeaders, TcpHeader, TransportHeader};
 
 use crate::error::IpStackError;
@@ -25,9 +26,13 @@ pub(crate) enum IpStackPacketProtocol {
     Tcp(TcpPacket),
     Udp,
 }
+
+#[derive(Derivative)]
+#[derivative(Debug)]
 pub struct NetworkPacket {
     pub ip: IpHeader,
     pub transport: TransportHeader,
+    #[derivative(Debug="ignore")]
     pub payload: Vec<u8>,
 }
 
