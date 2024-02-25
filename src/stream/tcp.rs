@@ -6,13 +6,7 @@ use crate::{
 };
 use etherparse::{Ipv4Extensions, Ipv4Header, Ipv6Extensions, TransportHeader};
 use std::{
-    cmp,
-    future::Future,
-    io::{Error, ErrorKind},
-    net::SocketAddr,
-    pin::Pin,
-    task::Waker,
-    time::Duration,
+    cmp, fmt::Display, future::Future, io::{Error, ErrorKind}, net::SocketAddr, pin::Pin, task::Waker, time::Duration
 };
 use tokio::{
     io::{AsyncRead, AsyncWrite},
@@ -38,6 +32,12 @@ pub struct IpStackTcpStream {
     mtu: u16,
     shutdown: Option<Notify>,
     write_notify: Option<Waker>,
+}
+
+impl Display for IpStackTcpStream {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_fmt(format_args!("{} -> {} <{:?}>", self.src_addr, self.dst_addr, self.tcb.tcp_timeout))
+    }
 }
 
 impl IpStackTcpStream {
@@ -98,7 +98,6 @@ impl IpStackTcpStream {
             seq.unwrap_or(self.tcb.get_seq()),
             self.tcb.get_recv_window(),
         );
-
         tcp_header.acknowledgment_number = self.tcb.get_ack();
         if flags & tcp_flags::SYN != 0 {
             tcp_header.syn = true;
@@ -187,11 +186,13 @@ impl AsyncRead for IpStackTcpStream {
             }
             let min = cmp::min(self.tcb.get_available_read_buffer_size() as u16, u16::MAX);
             self.tcb.change_recv_window(min);
-            if matches!(
+            // Timeout only applies to handshake.
+            // Otherwise it kills long-running connections.
+            if matches!(self.tcb.get_state(), TcpState::SynReceived(_)) && matches!(
                 Pin::new(&mut self.tcb.timeout).poll(cx),
                 std::task::Poll::Ready(_)
             ) {
-                trace!("timeout reached for {:?}", self.dst_addr);
+                trace!("timeout reached for {:?}. RST to {}", self.dst_addr, self.src_addr);
                 self.packet_sender
                     .send(self.create_rev_packet(
                         tcp_flags::RST | tcp_flags::ACK,
@@ -497,6 +498,16 @@ impl AsyncWrite for IpStackTcpStream {
 
 impl Drop for IpStackTcpStream {
     fn drop(&mut self) {
+        tracing::error!("Drop {}. {:?}", &self, self.tcb.get_state());
+        if self.tcb.get_state() != &TcpState::Closed {
+            self.packet_sender
+                    .send(self.create_rev_packet(
+                        tcp_flags::RST | tcp_flags::ACK,
+                        TTL,
+                        None,
+                        Vec::new(),
+                    ).unwrap()).unwrap();
+        }
         if let Ok(p) = self.create_rev_packet(0, DROP_TTL, None, Vec::new()) {
             _ = self.packet_sender.send(p);
         }

@@ -11,7 +11,7 @@ use crate::packet::TcpPacket;
 const MAX_UNACK: u32 = 1024 * 16; // 16KB
 const READ_BUFFER_SIZE: usize = 1024 * 16; // 16KB
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq, Copy)]
 pub enum TcpState {
     SynReceived(bool), // bool means if syn/ack is sent
     Established,
@@ -35,7 +35,7 @@ pub(super) struct Tcb {
     pub(super) ack: u32,
     pub(super) last_ack: u32,
     pub(super) timeout: Pin<Box<Sleep>>,
-    tcp_timeout: Duration,
+    pub tcp_timeout: Duration,
     recv_window: u16,
     pub(super) send_window: u16,
     state: TcpState,
