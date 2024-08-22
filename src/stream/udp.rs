@@ -4,13 +4,14 @@ use std::{
     io::{self, Error, ErrorKind},
     net::SocketAddr,
     pin::Pin,
-    task::Poll,
+    task::{Context, Poll},
     time::Duration,
 };
 
 use etherparse::{
     Ipv4Extensions, Ipv4Header, Ipv6Extensions, Ipv6Header, TransportHeader, UdpHeader,
 };
+use futures::{Sink, Stream};
 use tokio::{
     io::{AsyncRead, AsyncWrite},
     sync::mpsc::{self, UnboundedReceiver, UnboundedSender},
@@ -29,6 +30,51 @@ pub struct IpStackUdpStream {
     timeout: Pin<Box<Sleep>>,
     udp_timeout: Duration,
     mtu: u16,
+}
+
+impl Stream for IpStackUdpStream {
+    type Item = NetworkPacket;
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        if matches!(self.timeout.as_mut().poll(cx), std::task::Poll::Ready(_)) {
+            return Poll::Ready(None); // todo: return timeout error
+        }
+        let udp_timeout = self.udp_timeout;
+        match self.stream_receiver.poll_recv(cx) {
+            Poll::Ready(Some(p)) => {
+                self.timeout
+                    .as_mut()
+                    .reset(tokio::time::Instant::now() + udp_timeout);
+                Poll::Ready(Some(p))
+            }
+            Poll::Ready(None) => Poll::Ready(None),
+            Poll::Pending => Poll::Pending,
+        }
+    }
+}
+
+impl Sink<&[u8]> for IpStackUdpStream {
+    type Error = io::Error;
+    fn start_send(mut self: Pin<&mut Self>, item: &[u8]) -> Result<(), Self::Error> {
+        let udp_timeout = self.udp_timeout;
+        self.timeout
+            .as_mut()
+            .reset(tokio::time::Instant::now() + udp_timeout);
+        let packet = self.create_rev_packet(TTL, item.to_vec())?;
+        self.packet_sender
+            .send(packet)
+            .map_err(|_| Error::from(ErrorKind::UnexpectedEof))?;
+
+        Ok(())
+    }
+    fn poll_ready(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        Poll::Ready(Ok(()))
+    }
+    fn poll_close(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        Poll::Ready(Ok(()))
+    }
+    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        Poll::Ready(Ok(()))
+    }
 }
 
 impl IpStackUdpStream {

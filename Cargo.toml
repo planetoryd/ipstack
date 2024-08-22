@@ -20,6 +20,7 @@ tokio = { version = "1.33", features = [
 etherparse = { version = "0.13", default-features = false }
 thiserror = { version = "1.0", default-features = false }
 tracing = { version = "0.1.40", default-features = false }
+futures = "0.3.30"
 
 [dev-dependencies]
 udp-stream = { version = "0.0.9", default-features = false }
